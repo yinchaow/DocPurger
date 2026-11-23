@@ -1,0 +1,18 @@
+# Build outputs
+/build/bin/
+/dist/
+*.exe
+*.deb
+*.AppImage
+*.tar.gz
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/
+
+# Go / OS
+*.test
+*.out
+.DS_Store
+Thumbs.db
