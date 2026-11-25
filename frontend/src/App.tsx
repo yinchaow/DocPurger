@@ -869,7 +869,7 @@ export default function App() {
               文档清匣
             </span>
             <span className="text-[11px] font-mono text-slate-400 dark:text-slate-400">
-              DocPurger v{sysInfo?.appVersion || '1.2.0'}
+              DocPurger v{sysInfo?.appVersion || '1.3.0'}
             </span>
           </div>
         </div>
@@ -1061,10 +1061,10 @@ export default function App() {
             )}
           </div>
 
-          {/* Card 2: Fluent Navigation Document Type Filter (with signature 3px Fluent blue pill indicator) */}
-          <div className="space-y-1">
-            <div className="px-2 flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
+          {/* Card 2: Fluent Navigation Document Type Filter (unified mica-card matching Card 1 & Card 3) */}
+          <div className="mica-card rounded-xl p-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
                 <Layers className="w-3.5 h-3.5 text-[#0067C0] dark:text-[#60CDFF] shrink-0" />
                 文档类型
               </span>
@@ -1098,20 +1098,20 @@ export default function App() {
                     type="button"
                     onClick={() => toggleCategory(cat.id)}
                     title={cat.exts}
-                    className={`relative w-full flex items-center justify-between pl-3 pr-2.5 py-1 rounded-lg text-[12.5px] transition-all ${
+                    className={`relative w-full flex items-center justify-between pl-2.5 pr-2 py-1 rounded-lg text-[12px] transition-all ${
                       active
-                        ? 'bg-white/85 dark:bg-white/[0.09] text-slate-900 dark:text-white font-medium shadow-[0_1px_3px_rgba(15,23,42,0.05)]'
-                        : 'text-slate-400 dark:text-slate-500 hover:bg-white/45 dark:hover:bg-white/[0.04]'
+                        ? 'bg-[#0067C0]/[0.07] dark:bg-[#60CDFF]/[0.11] text-slate-900 dark:text-white font-medium'
+                        : 'text-slate-400 dark:text-slate-500 hover:bg-slate-200/45 dark:hover:bg-white/[0.04]'
                     }`}
                   >
                     {/* Signature Windows 11 Fluent 3px vertical accent pill */}
                     {active && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full bg-[#0067C0] dark:bg-[#60CDFF]" />
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-3.5 rounded-full bg-[#0067C0] dark:bg-[#60CDFF]" />
                     )}
-                    <span className="flex items-center gap-2.5 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0">
                       <FluentFileIcon
                         category={cat.id}
-                        className={`w-5 h-5 shrink-0 transition-opacity ${active ? 'opacity-100' : 'opacity-40 grayscale'}`}
+                        className={`w-[18px] h-[18px] shrink-0 transition-opacity ${active ? 'opacity-100' : 'opacity-40 grayscale'}`}
                       />
                       <span className="truncate">{cat.label}</span>
                     </span>
@@ -1134,7 +1134,7 @@ export default function App() {
               })}
             </div>
             {selectedCategories.length === 0 && (
-              <p className="px-2 pt-0.5 text-[10.5px] leading-snug text-amber-700 dark:text-amber-300">
+              <p className="pt-0.5 text-[10.5px] leading-snug text-amber-700 dark:text-amber-300">
                 请至少勾选一种要检索的文档类型
               </p>
             )}

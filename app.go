@@ -18,7 +18,7 @@ import (
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const AppVersion = "1.2.0"
+const AppVersion = "1.3.0"
 
 // App exposes backend capabilities to the Wails React frontend.
 type App struct {

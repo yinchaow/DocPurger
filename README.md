@@ -29,6 +29,6 @@ chmod +x scripts/build-all.sh
 ```
 
 产物输出在 `dist/` 目录：
-- `dist/DocPurger_1.2.0_windows_amd64.exe` — Windows 10/11 x64 免安装单文件
-- `dist/DocPurger_1.2.0_kylin_v10_sp1_amd64.deb` — 银河麒麟 V10 SP1 x64 安装包
-- `dist/DocPurger_1.2.0_kylin_v10_sp1_amd64.tar.gz` — 银河麒麟 V10 SP1 x64 绿色压缩包
+- `dist/DocPurger_1.3.0_windows_amd64.exe` — Windows 10/11 x64 免安装单文件
+- `dist/DocPurger_1.3.0_kylin_v10_sp1_amd64.deb` — 银河麒麟 V10 SP1 x64 安装包
+- `dist/DocPurger_1.3.0_kylin_v10_sp1_amd64.tar.gz` — 银河麒麟 V10 SP1 x64 绿色压缩包

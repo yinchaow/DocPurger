@@ -66,7 +66,7 @@ export const backend = {
     return {
       os: 'windows',
       arch: 'amd64',
-      appVersion: '1.2.0',
+      appVersion: '1.3.0',
       auditLogPath: '%APPDATA%\\DocPurger\\audit.jsonl',
       homeDir: 'D:\\工作文档',
     };

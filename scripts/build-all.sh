@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_NAME="docpurger-builder:20.04"
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 echo "==> [1/4] Checking Docker builder image ($IMAGE_NAME)..."
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
