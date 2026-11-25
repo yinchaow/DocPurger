@@ -9,6 +9,7 @@ interface KeywordInputProps {
   onSubmitSearch?: (extraTokens?: string[]) => void;
   placeholder: string;
   variant?: 'fluent-bar' | 'sidebar-exclude';
+  inputRefExternal?: React.RefObject<HTMLInputElement>;
 }
 
 export const KeywordInput: React.FC<KeywordInputProps> = ({
@@ -19,6 +20,7 @@ export const KeywordInput: React.FC<KeywordInputProps> = ({
   onSubmitSearch,
   placeholder,
   variant = 'fluent-bar',
+  inputRefExternal,
 }) => {
   const [internalDraft, setInternalDraft] = useState('');
   const draft = controlledDraft !== undefined ? controlledDraft : internalDraft;
@@ -26,7 +28,8 @@ export const KeywordInput: React.FC<KeywordInputProps> = ({
     if (onDraftChange) onDraftChange(val);
     else setInternalDraft(val);
   };
-  const inputRef = useRef<HTMLInputElement>(null);
+  const fallbackRef = useRef<HTMLInputElement>(null);
+  const inputRef = inputRefExternal || fallbackRef;
 
   const commitTokens = (raw: string): string[] => {
     const tokens = raw

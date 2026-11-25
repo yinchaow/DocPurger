@@ -4,6 +4,7 @@ import {
   Archive,
   Check,
   CheckSquare,
+  ClipboardPaste,
   Copy,
   Eraser,
   ExternalLink,
@@ -11,12 +12,18 @@ import {
   FolderInput,
   FolderOpen,
   FolderPlus,
+  FolderSearch,
   History,
   Info,
+  Layers,
   Loader2,
+  Maximize2,
+  Minimize2,
+  Minus,
   Moon,
   Plus,
   Search,
+  SlidersHorizontal,
   Square,
   SquareMinus,
   StopCircle,
@@ -95,8 +102,26 @@ export default function App() {
   }, [darkMode]);
 
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
+  const [isMaximised, setIsMaximised] = useState(false);
+
   useEffect(() => {
     backend.getSystemInfo().then(setSysInfo).catch(() => {});
+    backend.windowIsMaximised().then(setIsMaximised).catch(() => {});
+    backend.syncWindowCorners();
+    const onResize = () => {
+      backend.windowIsMaximised().then(setIsMaximised).catch(() => {});
+      backend.syncWindowCorners();
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const handleToggleMaximise = useCallback(() => {
+    backend.windowToggleMaximise();
+    setTimeout(() => {
+      backend.windowIsMaximised().then(setIsMaximised).catch(() => {});
+      backend.syncWindowCorners();
+    }, 80);
   }, []);
 
   // Multi-directory targets
@@ -123,17 +148,61 @@ export default function App() {
     }
   });
 
+  const [savedPrefs] = useState<Record<string, any>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('docpurger:prefs') || '{}') || {};
+    } catch {
+      return {};
+    }
+  });
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordDraft, setKeywordDraft] = useState<string>('');
   const [excludeKeywords, setExcludeKeywords] = useState<string[]>([]);
   const [excludeKeywordDraft, setExcludeKeywordDraft] = useState<string>('');
-  const [matchMode, setMatchMode] = useState<MatchMode>('OR');
-  const [scope, setScope] = useState<SearchScope>('both');
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [includeArchives, setIncludeArchives] = useState(true);
-  const [includeHidden, setIncludeHidden] = useState(false);
-  const [maxFileSizeMB, setMaxFileSizeMB] = useState<number>(100);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(ALL_CATEGORY_IDS);
+  const [matchMode, setMatchMode] = useState<MatchMode>(() =>
+    savedPrefs.matchMode === 'AND' ? 'AND' : 'OR'
+  );
+  const [scope, setScope] = useState<SearchScope>(() =>
+    savedPrefs.scope === 'filename' || savedPrefs.scope === 'content' ? savedPrefs.scope : 'both'
+  );
+  const [caseSensitive, setCaseSensitive] = useState<boolean>(() => Boolean(savedPrefs.caseSensitive));
+  const [includeArchives, setIncludeArchives] = useState<boolean>(() =>
+    typeof savedPrefs.includeArchives === 'boolean' ? savedPrefs.includeArchives : true
+  );
+  const [includeHidden, setIncludeHidden] = useState<boolean>(() => Boolean(savedPrefs.includeHidden));
+  const [maxFileSizeMB, setMaxFileSizeMB] = useState<number>(() =>
+    typeof savedPrefs.maxFileSizeMB === 'number' && savedPrefs.maxFileSizeMB > 0
+      ? savedPrefs.maxFileSizeMB
+      : 100
+  );
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
+    if (Array.isArray(savedPrefs.selectedCategories)) {
+      const valid = savedPrefs.selectedCategories.filter((c: string) => ALL_CATEGORY_IDS.includes(c));
+      if (valid.length > 0) return valid;
+    }
+    return ALL_CATEGORY_IDS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'docpurger:prefs',
+        JSON.stringify({
+          matchMode,
+          scope,
+          caseSensitive,
+          includeArchives,
+          includeHidden,
+          maxFileSizeMB,
+          selectedCategories,
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [matchMode, scope, caseSensitive, includeArchives, includeHidden, maxFileSizeMB, selectedCategories]);
 
   // Runtime state
   const [searching, setSearching] = useState(false);
@@ -257,6 +326,52 @@ export default function App() {
     }
   };
 
+  const handlePasteDirectories = useCallback(async () => {
+    try {
+      const raw = (await backend.clipboardGetText()).trim();
+      if (!raw) {
+        setShowDirInput(true);
+        notify('剪贴板为空，已展开路径输入框', 'info');
+        return;
+      }
+      const candidates = raw
+        .split(/\r?\n+/)
+        .map((line) => line.trim().replace(/^["']|["']$/g, '').trim())
+        .filter(Boolean);
+      if (candidates.length === 0) {
+        setShowDirInput(true);
+        return;
+      }
+      const validDirs = await backend.filterDirectories(candidates);
+      if (validDirs.length === 0) {
+        setDirInput(candidates[0]);
+        setShowDirInput(true);
+        notify('剪贴板内容不是有效文件夹路径，可在此手动修改', 'info');
+        return;
+      }
+      const existing = rootDirsRef.current;
+      const added = validDirs.filter((d) => !existing.includes(d));
+      const ignoredCount = candidates.length - validDirs.length;
+      if (added.length > 0) {
+        const next = [...existing, ...added];
+        setRootDirs(next);
+        persistRootDirs(next);
+        if (ignoredCount > 0) {
+          notify(`已粘贴添加 ${added.length} 个目录，已忽略 ${ignoredCount} 条无效路径`, 'success');
+        } else if (added.length === 1) {
+          notify(`已粘贴添加目录：${leafName(added[0])}`, 'success');
+        } else {
+          notify(`已粘贴添加 ${added.length} 个目录`, 'success');
+        }
+      } else {
+        notify('剪贴板中的目录已在搜索列表中', 'info');
+      }
+    } catch {
+      setShowDirInput(true);
+      notify('无法直接读取剪贴板，请在此手动粘贴路径', 'info');
+    }
+  }, [notify, persistRootDirs]);
+
   // Native OS directory drag-and-drop onto the directory card / dashed box
   useEffect(() => {
     return backend.onFileDrop(async (paths) => {
@@ -354,6 +469,14 @@ export default function App() {
       notify('请先在左侧添加至少一个搜索目录', 'error');
       return;
     }
+    if (selectedCategories.length === 0) {
+      notify('请先在左侧勾选至少一种文档类型', 'error');
+      return;
+    }
+    if (selectedCategories.length === 0) {
+      notify('请先在左侧勾选至少一种文档类型', 'error');
+      return;
+    }
 
     let finalKeywords = overrideKeywords ? [...overrideKeywords] : [...keywords];
     if (!overrideKeywords && keywordDraft.trim()) {
@@ -413,10 +536,10 @@ export default function App() {
       scope,
       caseSensitive,
       includeArchives,
-      categories: selectedCategories.length === ALL_CATEGORY_IDS.length ? [] : selectedCategories,
+      categories: selectedCategories,
       maxFileSizeMB,
       includeHidden,
-      maxArchiveDepth: 2,
+      maxArchiveDepth: 3,
     };
 
     try {
@@ -457,28 +580,64 @@ export default function App() {
     return list;
   }, [results, filterTab, quickFilter, sortBy]);
 
-  // Keyboard shortcuts: Ctrl+A select all visible, Esc clear selection
+  const activeItem = useMemo(() => {
+    if (visibleResults.length === 0 || activeId === '') return null;
+    return visibleResults.find((r) => r.id === activeId) || visibleResults[0];
+  }, [visibleResults, activeId]);
+
+  // Keyboard shortcuts: Esc close modals/selection, Ctrl+K focus search, Ctrl+Enter search, Ctrl+A select all
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (deleteModal.open) {
+          setDeleteModal({ open: false, mode: 'trash', targets: [] });
+          return;
+        }
+        if (aboutOpen) {
+          setAboutOpen(false);
+          return;
+        }
+        if (auditOpen) {
+          setAuditOpen(false);
+          return;
+        }
+        if (skippedOpen) {
+          setSkippedOpen(false);
+          return;
+        }
+      }
+
+      if (deleteModal.open || aboutOpen || auditOpen || skippedOpen) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !searching) {
+        e.preventDefault();
+        handleStartSearch();
+        return;
+      }
+
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (deleteModal.open || aboutOpen || auditOpen || skippedOpen) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && visibleResults.length > 0) {
         e.preventDefault();
         setSelectedIds(new Set(visibleResults.map((r) => r.id)));
-      } else if (e.key === 'Escape' && selectedIds.size > 0) {
-        setSelectedIds(new Set());
+      } else if (e.key === 'Escape') {
+        if (selectedIds.size > 0) {
+          setSelectedIds(new Set());
+        } else if (activeItem) {
+          setActiveId('');
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [visibleResults, selectedIds.size, deleteModal.open, aboutOpen, auditOpen, skippedOpen]);
-
-  const activeItem = useMemo(() => {
-    if (visibleResults.length === 0) return null;
-    return visibleResults.find((r) => r.id === activeId) || visibleResults[0];
-  }, [visibleResults, activeId]);
+  }, [visibleResults, selectedIds.size, activeItem, searching, deleteModal.open, aboutOpen, auditOpen, skippedOpen]);
 
   const selectedItems = useMemo(
     () => results.filter((r) => selectedIds.has(r.id)),
@@ -634,7 +793,6 @@ export default function App() {
   const toggleCategory = (catId: string) => {
     setSelectedCategories((prev) => {
       if (prev.includes(catId)) {
-        if (prev.length === 1) return prev;
         return prev.filter((c) => c !== catId);
       }
       return [...prev, catId];
@@ -654,7 +812,12 @@ export default function App() {
       if (r.matchInFilename) filename++;
       if (r.matchInContent) content++;
       if (r.isArchiveEntry || r.category === 'archive') archive++;
-      byCat[r.category] = (byCat[r.category] || 0) + 1;
+      const statCat = ALL_CATEGORY_IDS.includes(r.category)
+        ? r.category
+        : r.isArchiveEntry
+        ? 'archive'
+        : r.category;
+      byCat[statCat] = (byCat[statCat] || 0) + 1;
     }
     return { all: results.length, filename, content, archive, byCat };
   }, [results]);
@@ -684,77 +847,101 @@ export default function App() {
   }, [effectivePreviewKeywords, matchMode]);
 
   const leafName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || p;
+  const archiveCategorySelected = selectedCategories.includes('archive');
 
   return (
-    <div className="mica-backdrop h-screen w-screen flex overflow-hidden text-slate-800 dark:text-slate-100 select-none">
-      {/* ================= LEFT MICA NAVIGATION RAIL ================= */}
-      <aside className="w-[264px] shrink-0 h-full flex flex-col px-3.5 py-3.5 gap-3 overflow-hidden">
-        {/* Brand Header with unified Fluent 2 Logo */}
-        <div className="px-1.5 py-0.5 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <AppLogo className="w-9 h-9 shrink-0 drop-shadow-sm" />
-            <div>
-              <h1 className="text-[16px] font-bold tracking-tight text-slate-900 dark:text-white leading-tight">
-                文档清匣
-              </h1>
-              <p className="text-[10.5px] font-mono text-slate-400 dark:text-slate-400 leading-tight mt-0.5">
-                DocPurger v{sysInfo?.appVersion || '1.1.0'}
-              </p>
-            </div>
+    <div
+      className={`mica-backdrop h-screen w-screen flex flex-col overflow-hidden text-slate-800 dark:text-slate-100 select-none ${
+        isMaximised
+          ? ''
+          : 'rounded-[10px] border border-slate-300/65 dark:border-white/12'
+      }`}
+    >
+      {/* ================= INTEGRATED FRAMELESS FLUENT 2 TITLEBAR ================= */}
+      <div
+        onDoubleClick={handleToggleMaximise}
+        className="wails-drag h-10 shrink-0 px-3.5 flex items-center justify-between border-b border-slate-200/60 dark:border-white/[0.07] bg-white/40 dark:bg-black/20 backdrop-blur-md"
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <AppLogo className="w-6 h-6 shrink-0 drop-shadow-sm" />
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[13.5px] font-bold tracking-tight text-slate-900 dark:text-white">
+              文档清匣
+            </span>
+            <span className="text-[11px] font-mono text-slate-400 dark:text-slate-400">
+              DocPurger v{sysInfo?.appVersion || '1.2.0'}
+            </span>
           </div>
+        </div>
+
+        <div className="wails-no-drag flex items-center gap-1">
           <button
             type="button"
             onClick={() => setDarkMode((v) => !v)}
-            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-[#0067C0] dark:hover:text-[#60CDFF] hover:bg-white/60 dark:hover:bg-white/10 transition-colors"
-            title={darkMode ? '切换为浅色 Mica 磨砂' : '切换为深海云母暗色'}
+            className="w-8 h-7 inline-flex items-center justify-center rounded-md text-slate-500 dark:text-slate-400 hover:text-[#0067C0] dark:hover:text-[#60CDFF] hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            title={darkMode ? '切换为浅色 Mica 云母' : '切换为深海云母暗色'}
           >
-            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {darkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+          </button>
+          <span className="h-3.5 w-px bg-slate-300/70 dark:bg-white/15 mx-1" />
+          <button
+            type="button"
+            onClick={() => backend.windowMinimise()}
+            className="w-8 h-7 inline-flex items-center justify-center rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            title="最小化"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleToggleMaximise}
+            className="w-8 h-7 inline-flex items-center justify-center rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            title={isMaximised ? '向下还原' : '最大化'}
+          >
+            {isMaximised ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => backend.quit()}
+            className="w-8 h-7 inline-flex items-center justify-center rounded-md text-slate-500 dark:text-slate-400 hover:bg-[#E81123] hover:text-white transition-colors"
+            title="关闭"
+          >
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
+      </div>
 
+      {/* ================= MAIN THREE-COLUMN WORKSPACE ================= */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* ================= LEFT MICA NAVIGATION RAIL ================= */}
+      <aside className="w-[268px] shrink-0 h-full flex flex-col px-3.5 py-2.5 gap-2 overflow-hidden">
         {/* Scrollable Left Cards */}
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-0.5">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
           {/* Card 1: Multi-Directory Selector */}
           <div className="mica-card dir-drop-zone rounded-xl p-3 space-y-2 transition-all">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <FolderSearch className="w-3.5 h-3.5 text-[#0067C0] dark:text-[#60CDFF] shrink-0" />
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">
                   搜索目录
                 </span>
                 {rootDirs.length > 0 && (
-                  <span className="px-1.5 py-[1px] rounded-full text-[10px] font-mono font-semibold bg-[#0067C0]/12 text-[#0067C0] dark:bg-[#60CDFF]/15 dark:text-[#60CDFF]">
+                  <span className="px-1.5 py-[1px] rounded-full text-[10px] font-mono font-semibold bg-[#0067C0]/12 text-[#0067C0] dark:bg-[#60CDFF]/15 dark:text-[#60CDFF] shrink-0">
                     {rootDirs.length}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1">
-                {rootDirs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={clearDirectories}
-                    className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
-                    title="清空全部待搜索目录"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              {rootDirs.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setShowDirInput((v) => !v)}
-                  className="p-1 rounded-md text-slate-400 hover:text-[#0067C0] dark:hover:text-[#60CDFF] hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-                  title="手动输入/粘贴路径"
+                  onClick={clearDirectories}
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[11px] text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors whitespace-nowrap shrink-0"
+                  title="清空全部待搜索目录"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Trash2 className="w-3 h-3" />
+                  清空
                 </button>
-                <button
-                  type="button"
-                  onClick={handlePickAddDir}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[#0067C0]/10 hover:bg-[#0067C0]/18 text-[#0067C0] dark:bg-[#60CDFF]/15 dark:hover:bg-[#60CDFF]/25 dark:text-[#60CDFF] transition-colors"
-                >
-                  <FolderPlus className="w-3 h-3" />
-                  添加目录
-                </button>
-              </div>
+              )}
             </div>
 
             {showDirInput && (
@@ -782,7 +969,7 @@ export default function App() {
                       setShowDirInput(false);
                     }
                   }}
-                  className="px-2 py-1 rounded-md text-[11px] font-medium fluent-btn-primary"
+                  className="px-2 py-1 rounded-md text-[11px] font-medium fluent-btn-primary whitespace-nowrap shrink-0"
                 >
                   添加
                 </button>
@@ -793,12 +980,12 @@ export default function App() {
               <button
                 type="button"
                 onClick={handlePickAddDir}
-                className="dir-drop-dashed w-full py-3 px-2.5 rounded-lg border border-dashed border-slate-300 dark:border-white/15 hover:border-[#0067C0] dark:hover:border-[#60CDFF] text-center text-[11.5px] text-slate-500 dark:text-slate-400 hover:text-[#0067C0] dark:hover:text-[#60CDFF] transition-colors"
+                className="dir-drop-dashed w-full py-2.5 px-2.5 rounded-lg border border-dashed border-slate-300 dark:border-white/15 hover:border-[#0067C0] dark:hover:border-[#60CDFF] text-center text-[11.5px] text-slate-500 dark:text-slate-400 hover:text-[#0067C0] dark:hover:text-[#60CDFF] transition-colors"
               >
                 点击或拖入一个或多个目标目录
               </button>
             ) : (
-              <div className="space-y-1 max-h-36 overflow-y-auto">
+              <div className="space-y-1 max-h-28 overflow-y-auto">
                 {rootDirs.map((dir) => (
                   <div
                     key={dir}
@@ -826,6 +1013,28 @@ export default function App() {
                 ))}
               </div>
             )}
+
+            {/* Dedicated non-wrapping action row: 添加目录 + 粘贴路径 */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handlePickAddDir}
+                className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-[11.5px] font-medium bg-[#0067C0]/10 hover:bg-[#0067C0]/18 text-[#0067C0] dark:bg-[#60CDFF]/15 dark:hover:bg-[#60CDFF]/25 dark:text-[#60CDFF] transition-colors whitespace-nowrap"
+                title="选择待搜索的文件夹"
+              >
+                <FolderPlus className="w-3.5 h-3.5 shrink-0" />
+                添加目录
+              </button>
+              <button
+                type="button"
+                onClick={handlePasteDirectories}
+                className="inline-flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg text-[11.5px] font-medium bg-slate-200/65 hover:bg-slate-200 text-slate-700 dark:bg-white/10 dark:hover:bg-white/15 dark:text-slate-200 transition-colors whitespace-nowrap shrink-0"
+                title="从剪贴板一键粘贴目录路径（支持多行及带引号路径）"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5 shrink-0" />
+                粘贴
+              </button>
+            </div>
 
             {/* Quick recent dirs not currently selected */}
             {recentDirs.filter((d) => !rootDirs.includes(d)).length > 0 && (
@@ -855,16 +1064,26 @@ export default function App() {
           {/* Card 2: Fluent Navigation Document Type Filter (with signature 3px Fluent blue pill indicator) */}
           <div className="space-y-1">
             <div className="px-2 flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <Layers className="w-3.5 h-3.5 text-[#0067C0] dark:text-[#60CDFF] shrink-0" />
                 文档类型
               </span>
-              {selectedCategories.length < ALL_CATEGORY_IDS.length && (
+              {selectedCategories.length === ALL_CATEGORY_IDS.length ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategories([])}
+                  className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors"
+                  title="取消勾选全部文档类型，方便快速单选"
+                >
+                  清空
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() => setSelectedCategories(ALL_CATEGORY_IDS)}
-                  className="text-[11px] text-[#0067C0] dark:text-[#60CDFF] hover:underline"
+                  className="text-[11px] font-medium text-[#0067C0] dark:text-[#60CDFF] hover:underline"
                 >
-                  全部勾选
+                  全选
                 </button>
               )}
             </div>
@@ -879,7 +1098,7 @@ export default function App() {
                     type="button"
                     onClick={() => toggleCategory(cat.id)}
                     title={cat.exts}
-                    className={`relative w-full flex items-center justify-between pl-3 pr-2.5 py-1.5 rounded-lg text-[12.5px] transition-all ${
+                    className={`relative w-full flex items-center justify-between pl-3 pr-2.5 py-1 rounded-lg text-[12.5px] transition-all ${
                       active
                         ? 'bg-white/85 dark:bg-white/[0.09] text-slate-900 dark:text-white font-medium shadow-[0_1px_3px_rgba(15,23,42,0.05)]'
                         : 'text-slate-400 dark:text-slate-500 hover:bg-white/45 dark:hover:bg-white/[0.04]'
@@ -896,30 +1115,42 @@ export default function App() {
                       />
                       <span className="truncate">{cat.label}</span>
                     </span>
-                    <span className="text-[11px] font-mono tabular-nums text-slate-400 dark:text-slate-400">
-                      {hitCount > 0 ? hitCount : ''}
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      {hitCount > 0 ? (
+                        <span
+                          title={`当前检索结果中该类型共命中 ${hitCount} 个文件`}
+                          className="px-1.5 py-[1px] rounded-full text-[10.5px] font-medium tabular-nums bg-[#0067C0]/12 text-[#0067C0] dark:bg-[#60CDFF]/15 dark:text-[#60CDFF] whitespace-nowrap"
+                        >
+                          命中 {hitCount}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-normal text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                          {cat.extHint}
+                        </span>
+                      )}
                     </span>
                   </button>
                 );
               })}
             </div>
+            {selectedCategories.length === 0 && (
+              <p className="px-2 pt-0.5 text-[10.5px] leading-snug text-amber-700 dark:text-amber-300">
+                请至少勾选一种要检索的文档类型
+              </p>
+            )}
           </div>
 
           {/* Card 3: Settings Card (Fluent Toggles & Scope) */}
-          <div className="mica-card rounded-xl p-3 space-y-3">
-            <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">检索设置</div>
+          <div className="mica-card rounded-xl p-3 space-y-2.5">
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#0067C0] dark:text-[#60CDFF] shrink-0" />
+              检索设置
+            </div>
 
             {/* Scope */}
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">搜索范围</span>
-                <span className="text-[10.5px] text-slate-400 dark:text-slate-500">
-                  {scope === 'both'
-                    ? '文件名和内容都搜'
-                    : scope === 'filename'
-                    ? '只查文件名称'
-                    : '只查文件内容'}
-                </span>
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">搜索范围</span>
               </div>
               <div className="flex p-0.5 rounded-lg bg-slate-200/65 dark:bg-black/25">
                 {(
@@ -959,23 +1190,43 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <p className="text-[10.5px] leading-snug text-slate-400 dark:text-slate-500">
+                {scope === 'both'
+                  ? '既查文件名，也读文档正文（推荐）'
+                  : scope === 'filename'
+                  ? '只匹配文件名称，不读正文（极速）'
+                  : '只搜索文档内部文字，忽略文件名'}
+              </p>
             </div>
 
-            <div className="space-y-2.5 text-xs text-slate-700 dark:text-slate-300">
-              <div className="flex items-center justify-between">
-                <span>穿透压缩文件</span>
-                <FluentToggle checked={includeArchives} onChange={setIncludeArchives} />
+            <div className="space-y-2 text-xs text-slate-800 dark:text-slate-100">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className={`font-medium ${!archiveCategorySelected ? 'text-slate-400 dark:text-slate-500' : ''}`}>
+                    穿透压缩文件
+                  </span>
+                  <FluentToggle checked={includeArchives} onChange={setIncludeArchives} />
+                </div>
+                {includeArchives && !archiveCategorySelected ? (
+                  <div className="px-2 py-1 rounded-md bg-amber-500/12 border border-amber-500/25 text-[10.5px] text-amber-800 dark:text-amber-300 leading-snug animate-fade-in">
+                    未勾选「压缩文件」，此开关当前不生效
+                  </div>
+                ) : includeArchives ? (
+                  <p className="text-[10.5px] leading-snug text-slate-400 dark:text-slate-500">
+                    免解压直读 zip/rar/7z/tar.gz 内文档
+                  </p>
+                ) : null}
               </div>
               <div className="flex items-center justify-between">
-                <span>区分大小写</span>
+                <span className="font-medium">区分大小写</span>
                 <FluentToggle checked={caseSensitive} onChange={setCaseSensitive} />
               </div>
               <div className="flex items-center justify-between">
-                <span>含隐藏文件</span>
+                <span className="font-medium">含隐藏文件</span>
                 <FluentToggle checked={includeHidden} onChange={setIncludeHidden} />
               </div>
               <div className="flex items-center justify-between pt-0.5">
-                <span>单文件上限</span>
+                <span className="font-medium">单文件上限</span>
                 <select
                   value={maxFileSizeMB}
                   onChange={(e) => setMaxFileSizeMB(Number(e.target.value))}
@@ -1037,7 +1288,7 @@ export default function App() {
       </aside>
 
       {/* ================= RIGHT MAIN WORKSPACE ================= */}
-      <div className="flex-1 min-w-0 h-full flex flex-col py-3.5 pr-3.5 pl-1 gap-3 overflow-hidden">
+      <div className="flex-1 min-w-0 h-full flex flex-col py-3 pr-3.5 pl-1 gap-3 overflow-hidden">
         {/* TOP FLUENT SEARCH COMMAND HEADER */}
         <header className="shrink-0 space-y-1.5">
           <div className="fluent-search-bar rounded-xl px-3.5 py-2 flex items-center gap-2.5">
@@ -1049,22 +1300,23 @@ export default function App() {
               draft={keywordDraft}
               onDraftChange={setKeywordDraft}
               onSubmitSearch={(nextKws) => handleStartSearch(nextKws)}
-              placeholder="输入关键词，回车可添加多个，或直接点击检索…"
+              placeholder="输入关键词，回车可添加多个，或直接点击检索… (Ctrl+K)"
               variant="fluent-bar"
+              inputRefExternal={searchInputRef}
             />
 
-            {/* Plain-language Match Mode Switch: 包含任意 vs 同时包含 */}
+            {/* Match Mode Segmented Control: Elevated neutral white pill so primary Fluent Blue belongs solely to 检索 */}
             <div
-              className="inline-flex items-center p-0.5 rounded-lg bg-slate-200/70 dark:bg-black/30 border border-slate-200/80 dark:border-white/[0.08] shrink-0"
+              className="h-8 inline-flex items-center p-[3px] rounded-lg bg-slate-200/75 dark:bg-black/30 border border-slate-200/80 dark:border-white/[0.08] shrink-0"
               title="多关键词匹配方式：包含任意 = 出现其中任意一个即匹配；同时包含 = 必须全部出现"
             >
               <button
                 type="button"
                 onClick={() => setMatchMode('OR')}
-                className={`px-2.5 py-1 rounded-[6px] text-xs font-medium transition-all whitespace-nowrap ${
+                className={`h-full px-2.5 inline-flex items-center justify-center rounded-[5px] text-[11.5px] transition-all whitespace-nowrap ${
                   matchMode === 'OR'
-                    ? 'bg-[#0067C0] text-white dark:bg-[#60CDFF] dark:text-[#0A1929] shadow-sm'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    ? 'bg-white dark:bg-white/15 text-slate-900 dark:text-white font-semibold shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 font-medium hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 包含任意
@@ -1072,10 +1324,10 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setMatchMode('AND')}
-                className={`px-2.5 py-1 rounded-[6px] text-xs font-medium transition-all whitespace-nowrap ${
+                className={`h-full px-2.5 inline-flex items-center justify-center rounded-[5px] text-[11.5px] transition-all whitespace-nowrap ${
                   matchMode === 'AND'
-                    ? 'bg-[#0067C0] text-white dark:bg-[#60CDFF] dark:text-[#0A1929] shadow-sm'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    ? 'bg-white dark:bg-white/15 text-slate-900 dark:text-white font-semibold shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 font-medium hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 同时包含
@@ -1086,18 +1338,18 @@ export default function App() {
               type="button"
               disabled={searching || !canClearAll}
               onClick={handleClearAll}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium fluent-btn-subtle shrink-0 disabled:opacity-45 disabled:pointer-events-none"
-              title="一键清空待搜索目录、关键词及排除词"
+              className="h-8 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-xs font-medium fluent-btn-subtle shrink-0 disabled:opacity-45 disabled:pointer-events-none whitespace-nowrap"
+              title="清空待搜索目录、关键词及排除词"
             >
               <Eraser className="w-3.5 h-3.5" />
-              一键清空
+              清空
             </button>
 
             {searching ? (
               <button
                 type="button"
                 onClick={() => backend.cancelSearch()}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-sm transition-colors shrink-0"
+                className="h-8 px-4 inline-flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-sm transition-colors shrink-0 whitespace-nowrap"
               >
                 <StopCircle className="w-3.5 h-3.5" />
                 停止
@@ -1106,8 +1358,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => handleStartSearch()}
-                className="inline-flex items-center gap-1.5 px-5 py-1.5 rounded-lg text-xs font-semibold fluent-btn-primary shrink-0"
+                className="h-8 px-4 inline-flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold fluent-btn-primary shrink-0 whitespace-nowrap"
               >
+                <Search className="w-3.5 h-3.5" />
                 检索
               </button>
             )}
@@ -1245,12 +1498,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* Subtle Shift / Ctrl multi-select hint bar when results exist */}
-            {hasSearched && visibleResults.length > 1 && (
-              <div className="px-4 py-1 bg-white/35 dark:bg-white/[0.02] border-b border-slate-200/50 dark:border-white/[0.05] text-[10.5px] text-slate-400 dark:text-slate-500 flex items-center justify-between">
-                <span>提示：按住 Shift 点击任意行可连续批量勾选，按住 Ctrl 点击可逐项切换，Ctrl+A 全选</span>
+            {/* Subtle Shift / Ctrl multi-select hint bar or live scan dir */}
+            {hasSearched && (visibleResults.length > 0 || searching) && (
+              <div className="px-4 py-1 bg-white/35 dark:bg-white/[0.02] border-b border-slate-200/50 dark:border-white/[0.05] text-[10.5px] text-slate-400 dark:text-slate-500 flex items-center justify-between gap-3">
+                <span className="truncate">
+                  {searching && progress.currentDir
+                    ? `正在扫描：${progress.currentDir}`
+                    : '提示：双击条目可打开文档，Shift 连续勾选，Ctrl 逐项切换，Ctrl+A 全选'}
+                </span>
                 {selectedIds.size > 0 && (
-                  <span className="font-medium text-[#0067C0] dark:text-[#60CDFF]">
+                  <span className="font-medium text-[#0067C0] dark:text-[#60CDFF] shrink-0">
                     当前已选 {selectionStats.physicalCount} 个磁盘文件
                   </span>
                 )}
@@ -1266,8 +1523,19 @@ export default function App() {
                     文档清匣 · 精准检索与批量清理
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mt-2 leading-relaxed">
-                    在左侧添加一个或多个目标目录，在上方输入关键词点击「检索」。支持 Office / 老式 DOC·XLS·PPT / PDF / 国产 OFD 与压缩包内正文穿透检索，纯本地高速运行。
+                    在左侧添加一个或多个目标目录，在上方输入关键词点击「检索」。支持 Office / 老式 DOC·XLS·PPT / PDF / 国产 OFD 与压缩文件内正文穿透检索，纯本地高速运行。
                   </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-400 dark:text-slate-500">
+                    <span className="px-2 py-0.5 rounded-md bg-white/70 dark:bg-white/[0.05] border border-slate-200/70 dark:border-white/[0.08] font-mono">
+                      Ctrl+K 聚焦搜索
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white/70 dark:bg-white/[0.05] border border-slate-200/70 dark:border-white/[0.08] font-mono">
+                      Ctrl+Enter 开始检索
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white/70 dark:bg-white/[0.05] border border-slate-200/70 dark:border-white/[0.08] font-mono">
+                      双击条目打开文档
+                    </span>
+                  </div>
                   {rootDirs.length === 0 && (
                     <button
                       type="button"
@@ -1325,6 +1593,11 @@ export default function App() {
                     <div
                       key={item.id}
                       onClick={(e) => handleRowClick(e, idx, item.id)}
+                      onDoubleClick={() =>
+                        backend.openFile(item.filePath).catch((err) =>
+                          notify(`打开文档失败：${err?.message || err}`, 'error')
+                        )
+                      }
                       className={`fluent-result-card group rounded-xl px-3.5 py-3 flex items-center gap-3 cursor-pointer ${
                         isSelected ? 'is-selected' : isActive ? 'is-active' : ''
                       }`}
@@ -1501,30 +1774,33 @@ export default function App() {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex items-center gap-2 pt-0.5">
+                  <div className="flex items-center gap-1.5 pt-0.5">
                     <button
                       type="button"
                       onClick={() => backend.revealInFolder(activeItem.filePath)}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium fluent-btn-subtle"
+                      className="flex-1 inline-flex items-center justify-center gap-1 py-2 px-2 rounded-lg text-[11.5px] font-medium fluent-btn-subtle whitespace-nowrap"
+                      title="在文件管理器中打开所在目录并选中该文件"
                     >
-                      <FolderOpen className="w-3.5 h-3.5 text-[#0067C0] dark:text-[#60CDFF]" />
-                      打开所在目录
+                      <FolderOpen className="w-3.5 h-3.5 text-[#0067C0] dark:text-[#60CDFF] shrink-0" />
+                      打开目录
                     </button>
                     <button
                       type="button"
                       onClick={() => backend.openFile(activeItem.filePath)}
-                      className="p-2 rounded-lg fluent-btn-subtle"
-                      title="用默认程序打开文档"
+                      className="flex-1 inline-flex items-center justify-center gap-1 py-2 px-2 rounded-lg text-[11.5px] font-medium fluent-btn-subtle whitespace-nowrap"
+                      title="使用系统默认程序打开此文档"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 shrink-0" />
+                      打开文件
                     </button>
                     <button
                       type="button"
                       onClick={() => openDeleteDialog('trash', [activeItem])}
-                      className="p-2 rounded-lg fluent-btn-subtle hover:!text-rose-600 hover:!border-rose-300"
-                      title="移入回收站"
+                      className="flex-1 inline-flex items-center justify-center gap-1 py-2 px-2 rounded-lg text-[11.5px] font-medium fluent-btn-subtle hover:!text-rose-600 hover:!border-rose-300 whitespace-nowrap"
+                      title="将此文件移入系统回收站"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                      移入回收站
                     </button>
                   </div>
                 </div>
@@ -1645,10 +1921,11 @@ export default function App() {
           </div>
         </footer>
       </div>
+      </div>
 
       {/* TOAST */}
       {toast && (
-        <div className="fixed top-4 right-5 z-50 animate-fade-in">
+        <div className="fixed top-12 right-5 z-50 animate-fade-in">
           <div
             className={`px-4 py-2 rounded-xl text-xs font-medium shadow-lg border backdrop-blur-md ${
               toast.tone === 'error'

@@ -20,6 +20,7 @@ interface AuditDrawerProps {
 export const AuditDrawer: React.FC<AuditDrawerProps> = ({ open, onClose, onNotify }) => {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -32,7 +33,10 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({ open, onClose, onNotif
   };
 
   useEffect(() => {
-    if (open) load();
+    if (open) {
+      setConfirmClear(false);
+      load();
+    }
   }, [open]);
 
   if (!open) return null;
@@ -47,8 +51,13 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({ open, onClose, onNotif
   };
 
   const handleClear = async () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
     await backend.clearAuditLogs();
     setEntries([]);
+    setConfirmClear(false);
     onNotify('操作审计日志已清空', 'info');
   };
 
@@ -88,10 +97,16 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({ open, onClose, onNotif
                 <button
                   type="button"
                   onClick={handleClear}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-500/10 transition-colors"
-                  title="清空日志"
+                  onBlur={() => setConfirmClear(false)}
+                  className={`inline-flex items-center gap-1 rounded-lg transition-colors ${
+                    confirmClear
+                      ? 'px-2.5 py-1.5 text-xs font-medium bg-rose-600 text-white hover:bg-rose-500'
+                      : 'p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-500/10'
+                  }`}
+                  title={confirmClear ? '再次点击确认清空全部审计日志' : '清空日志'}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
+                  {confirmClear && <span>确认清空？</span>}
                 </button>
               </>
             )}

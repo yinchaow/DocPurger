@@ -17,6 +17,7 @@ declare global {
           GetSystemInfo(): Promise<SystemInfo>;
           SelectDirectory(defaultDir: string): Promise<string>;
           FilterDirectories(paths: string[]): Promise<string[]>;
+          SyncWindowCorners(): Promise<void>;
           SelectQuarantineDir(defaultDir: string): Promise<string>;
           StartSearch(opts: SearchOptions): Promise<void>;
           CancelSearch(): Promise<void>;
@@ -38,6 +39,11 @@ declare global {
         useDropTarget?: boolean
       ): void;
       OnFileDropOff?(): void;
+      WindowMinimise?(): void;
+      WindowToggleMaximise?(): void;
+      WindowIsMaximised?(): Promise<boolean>;
+      ClipboardGetText?(): Promise<string>;
+      Quit?(): void;
     };
   }
 }
@@ -60,7 +66,7 @@ export const backend = {
     return {
       os: 'windows',
       arch: 'amd64',
-      appVersion: '1.1.0',
+      appVersion: '1.2.0',
       auditLogPath: '%APPDATA%\\DocPurger\\audit.jsonl',
       homeDir: 'D:\\工作文档',
     };
@@ -321,5 +327,38 @@ export const backend = {
       };
     }
     return () => {};
+  },
+
+  windowMinimise(): void {
+    window.runtime?.WindowMinimise?.();
+  },
+
+  windowToggleMaximise(): void {
+    window.runtime?.WindowToggleMaximise?.();
+  },
+
+  async windowIsMaximised(): Promise<boolean> {
+    if (window.runtime?.WindowIsMaximised) {
+      return window.runtime.WindowIsMaximised();
+    }
+    return false;
+  },
+
+  async clipboardGetText(): Promise<string> {
+    if (window.runtime?.ClipboardGetText) {
+      return window.runtime.ClipboardGetText();
+    }
+    if (navigator.clipboard?.readText) {
+      return navigator.clipboard.readText();
+    }
+    return '';
+  },
+
+  syncWindowCorners(): void {
+    window.go?.main?.App?.SyncWindowCorners?.().catch(() => {});
+  },
+
+  quit(): void {
+    window.runtime?.Quit?.();
   },
 };

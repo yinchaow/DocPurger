@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_NAME="docpurger-builder:20.04"
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 echo "==> [1/4] Checking Docker builder image ($IMAGE_NAME)..."
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
@@ -44,10 +44,10 @@ docker run --rm \
     go test -v ./...
 
     echo "--- Building Kylin V10 SP1 x64 binary (Ubuntu 20.04 / glibc 2.31 / webkit2gtk-4.0) ---"
-    wails build -clean -skipbindings -s -platform linux/amd64 -o docpurger
+    wails build -clean -skipbindings -s -ldflags "-s -w" -platform linux/amd64 -o docpurger
 
     echo "--- Verifying Linux binary GLIBC max version & dynamic libraries ---"
-    ldd build/bin/docpurger | head -n 15
+    (ldd build/bin/docpurger || true) | head -n 15
     MAX_GLIBC=$(objdump -T build/bin/docpurger 2>/dev/null | grep -oE "GLIBC_[0-9]+\.[0-9]+" | sort -Vu | tail -n 1 || true)
     echo "Max required GLIBC symbol: ${MAX_GLIBC:-unknown}"
 
@@ -110,7 +110,7 @@ EOF
     tar -C /tmp -czf "/workspace/dist/DocPurger_${VERSION}_kylin_v10_sp1_amd64.tar.gz" DocPurger-kylin-portable
 
     echo "--- Cross-compiling Windows x64 portable .exe (zero CGO) ---"
-    wails build -skipbindings -s -platform windows/amd64 -o DocPurger.exe
+    wails build -skipbindings -s -ldflags "-s -w" -platform windows/amd64 -o DocPurger.exe
     cp build/bin/DocPurger.exe "/workspace/dist/DocPurger_${VERSION}_windows_amd64.exe"
 
     # Align ownership of generated artifacts with host user

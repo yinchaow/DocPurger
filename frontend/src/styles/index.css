@@ -258,6 +258,16 @@
   animation: scanBeam 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+/* Wails frameless titlebar drag regions */
+.wails-drag {
+  --wails-draggable: drag;
+  user-select: none;
+}
+
+.wails-no-drag {
+  --wails-draggable: no-drag;
+}
+
 /* Wails native directory drag-and-drop target */
 .dir-drop-zone {
   --wails-drop-target: drop;

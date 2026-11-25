@@ -20,14 +20,20 @@ func main() {
 	err := wails.Run(&options.App{
 		Title:            "文档清匣 — 智能文档检索与批量清理工具",
 		Width:            1340,
-		Height:           940,
+		Height:           970,
 		MinWidth:         1060,
 		MinHeight:        680,
+		Frameless:        true,
 		BackgroundColour: &options.RGBA{R: 239, G: 244, B: 250, A: 255},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
+		OnStartup:  app.startup,
+		OnDomReady: app.domReady,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               "com.yinchaow.docpurger.single-instance",
+			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
+		},
 		Bind: []interface{}{
 			app,
 		},

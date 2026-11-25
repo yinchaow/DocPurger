@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -14,6 +15,9 @@ import (
 var (
 	shell32                        = syscall.NewLazyDLL("shell32.dll")
 	ole32                          = syscall.NewLazyDLL("ole32.dll")
+	user32                         = syscall.NewLazyDLL("user32.dll")
+	dwmapi                         = syscall.NewLazyDLL("dwmapi.dll")
+	gdi32                          = syscall.NewLazyDLL("gdi32.dll")
 	procSHFileOperation            = shell32.NewProc("SHFileOperationW")
 	procSHOpenFolderAndSelectItems = shell32.NewProc("SHOpenFolderAndSelectItems")
 	procILCreateFromPathW          = shell32.NewProc("ILCreateFromPathW")
@@ -21,17 +25,89 @@ var (
 	procShellExecuteW              = shell32.NewProc("ShellExecuteW")
 	procCoInitializeEx             = ole32.NewProc("CoInitializeEx")
 	procCoUninitialize             = ole32.NewProc("CoUninitialize")
+	procEnumWindows                = user32.NewProc("EnumWindows")
+	procGetWindowThreadProcessId   = user32.NewProc("GetWindowThreadProcessId")
+	procGetClassNameW              = user32.NewProc("GetClassNameW")
+	procIsZoomed                   = user32.NewProc("IsZoomed")
+	procGetWindowRect              = user32.NewProc("GetWindowRect")
+	procSetWindowRgn               = user32.NewProc("SetWindowRgn")
+	procDwmSetWindowAttribute      = dwmapi.NewProc("DwmSetWindowAttribute")
+	procCreateRoundRectRgn         = gdi32.NewProc("CreateRoundRectRgn")
 )
 
 const (
-	foDelete               = 0x0003
-	fofSilent              = 0x0004
-	fofNoConfirmation      = 0x0010
-	fofAllowUndo           = 0x0040
-	fofNoErrorUI           = 0x0400
-	coinitApartmentThread  = 0x2
-	swShowNormal           = 1
+	foDelete                  = 0x0003
+	fofSilent                 = 0x0004
+	fofNoConfirmation         = 0x0010
+	fofAllowUndo              = 0x0040
+	fofNoErrorUI              = 0x0400
+	coinitApartmentThread     = 0x2
+	swShowNormal              = 1
+	dwmwaWindowCornerPref     = 33
+	dwmwcpRound               = 2
 )
+
+type winRect struct {
+	Left   int32
+	Top    int32
+	Right  int32
+	Bottom int32
+}
+
+// ApplyWindowRoundedCorners enables native Windows 11 DWM rounded corners (DWMWA_WINDOW_CORNER_PREFERENCE),
+// and falls back to CreateRoundRectRgn + SetWindowRgn on Windows 10 so frameless windows are rounded on both.
+func ApplyWindowRoundedCorners() {
+	pid := uint32(os.Getpid())
+	var targetHwnd uintptr
+
+	cb := syscall.NewCallback(func(hwnd uintptr, lparam uintptr) uintptr {
+		var winPid uint32
+		procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&winPid)))
+		if winPid != pid {
+			return 1
+		}
+		var clsBuf [64]uint16
+		n, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), uintptr(len(clsBuf)))
+		if n > 0 && syscall.UTF16ToString(clsBuf[:n]) == "wailsWindow" {
+			targetHwnd = hwnd
+			return 0 // found main Wails window, stop enumeration
+		}
+		return 1
+	})
+	procEnumWindows.Call(cb, 0)
+	if targetHwnd == 0 {
+		return
+	}
+
+	// 1. Try Windows 11 native DWM rounded corners (anti-aliased + Aero drop shadow)
+	pref := uint32(dwmwcpRound)
+	hr, _, _ := procDwmSetWindowAttribute.Call(
+		targetHwnd,
+		dwmwaWindowCornerPref,
+		uintptr(unsafe.Pointer(&pref)),
+		unsafe.Sizeof(pref),
+	)
+	if hr == 0 {
+		return
+	}
+
+	// 2. Fallback for Windows 10: apply CreateRoundRectRgn when normal, clear region when maximized
+	zoomed, _, _ := procIsZoomed.Call(targetHwnd)
+	if zoomed != 0 {
+		procSetWindowRgn.Call(targetHwnd, 0, 1)
+		return
+	}
+	var r winRect
+	procGetWindowRect.Call(targetHwnd, uintptr(unsafe.Pointer(&r)))
+	w := r.Right - r.Left
+	h := r.Bottom - r.Top
+	if w > 0 && h > 0 {
+		hrgn, _, _ := procCreateRoundRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1), 20, 20)
+		if hrgn != 0 {
+			procSetWindowRgn.Call(targetHwnd, hrgn, 1)
+		}
+	}
+}
 
 type shFileOpStructW struct {
 	hwnd                  uintptr
@@ -125,10 +201,14 @@ func OpenFile(targetPath string) error {
 }
 
 // MoveToTrash sends the file to the Windows Recycle Bin using native SHFileOperationW (zero CGO).
+// Refuses UNC network paths because Windows Recycle Bin does not support network shares and would silently permanently delete them.
 func MoveToTrash(targetPath string) error {
 	absPath, err := filepath.Abs(targetPath)
 	if err != nil {
 		return err
+	}
+	if strings.HasPrefix(absPath, `\\`) {
+		return fmt.Errorf("网络共享路径不支持移入系统回收站，请改用「隔离备份」或确认后彻底删除")
 	}
 	if _, err := os.Stat(absPath); err != nil {
 		return err

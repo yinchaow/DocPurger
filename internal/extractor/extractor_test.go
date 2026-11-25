@@ -3,6 +3,7 @@ package extractor
 import (
 	"archive/zip"
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -125,5 +126,34 @@ func TestWalkZipGBKFilenameAndContent(t *testing.T) {
 	txt, _, _ := ExtractBytes(found[0].Data, found[0].FileName)
 	if !strings.Contains(txt, "内部合同金额") {
 		t.Fatalf("zip inner content extraction failed: %q", txt)
+	}
+}
+
+func TestPDFFallbackFlateToUnicodeCMap(t *testing.T) {
+	// Craft a minimal non-standard PDF stream with FlateDecode + ToUnicode CMap mapping 0001->预 0002->算
+	compress := func(src string) []byte {
+		var b bytes.Buffer
+		w := zlib.NewWriter(&b)
+		_, _ = w.Write([]byte(src))
+		_ = w.Close()
+		return b.Bytes()
+	}
+
+	cmapStream := compress("1 beginbfchar\n<0001> <9884>\n<0002> <7B97>\nendbfchar")
+	contentStream := compress("BT /F1 12 Tf <00010002> Tj ET")
+
+	var pdfBuf bytes.Buffer
+	pdfBuf.WriteString("%PDF-1.5\n1 0 obj\n<< /Filter /FlateDecode >>\nstream\n")
+	pdfBuf.Write(cmapStream)
+	pdfBuf.WriteString("\nendstream\nendobj\n2 0 obj\n<< /Filter /FlateDecode >>\nstream\n")
+	pdfBuf.Write(contentStream)
+	pdfBuf.WriteString("\nendstream\nendobj\n%%EOF\n")
+
+	txt, skip, err := ExtractBytes(pdfBuf.Bytes(), "测试.pdf")
+	if err != nil || skip != "" {
+		t.Fatalf("unexpected PDF fallback error/skip: %v / %q", err, skip)
+	}
+	if !strings.Contains(txt, "预算") {
+		t.Fatalf("expected CMap decoded Chinese '预算', got %q", txt)
 	}
 }

@@ -62,7 +62,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ open, sysInfo, onClose, 
                   文档清匣
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#0067C0]/12 text-[#0067C0] dark:bg-[#60CDFF]/15 dark:text-[#60CDFF]">
-                  v{sysInfo?.appVersion || '1.1.0'}
+                  v{sysInfo?.appVersion || '1.2.0'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">

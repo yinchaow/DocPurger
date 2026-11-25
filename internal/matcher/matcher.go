@@ -10,15 +10,16 @@ import (
 
 // Engine performs multi-keyword AND/OR/Exclude matching and extracts highlighted snippets.
 type Engine struct {
-	keywords        []string
-	normKeywords    []string
-	excludes        []string
-	normExcludes    []string
-	mode            model.MatchMode
-	scope           model.SearchScope
-	caseSensitive   bool
-	maxSnippets     int
-	snippetRadius   int
+	keywords      []string
+	normKeywords  []string
+	normKwRunes   [][]rune
+	excludes      []string
+	normExcludes  []string
+	mode          model.MatchMode
+	scope         model.SearchScope
+	caseSensitive bool
+	maxSnippets   int
+	snippetRadius int
 }
 
 // Outcome represents the result of evaluating a document.
@@ -59,6 +60,17 @@ func New(opts model.SearchOptions) *Engine {
 	kws, normKws := clean(opts.Keywords)
 	excs, normExcs := clean(opts.ExcludeKeywords)
 
+	normKwRunes := make([][]rune, len(kws))
+	for i, origKw := range kws {
+		r := []rune(origKw)
+		if !opts.CaseSensitive {
+			for j := range r {
+				r[j] = unicode.ToLower(r[j])
+			}
+		}
+		normKwRunes[i] = r
+	}
+
 	mode := opts.Mode
 	if mode != model.MatchModeOr {
 		mode = model.MatchModeAnd
@@ -71,6 +83,7 @@ func New(opts model.SearchOptions) *Engine {
 	return &Engine{
 		keywords:      kws,
 		normKeywords:  normKws,
+		normKwRunes:   normKwRunes,
 		excludes:      excs,
 		normExcludes:  normExcs,
 		mode:          mode,
@@ -218,13 +231,7 @@ func (e *Engine) findRuneHits(text string, limit int) ([]rawHit, int) {
 	var hits []rawHit
 	totalHits := 0
 
-	for ki, origKw := range e.keywords {
-		kwRunes := []rune(origKw)
-		if !e.caseSensitive {
-			for i, r := range kwRunes {
-				kwRunes[i] = unicode.ToLower(r)
-			}
-		}
+	for ki, kwRunes := range e.normKwRunes {
 		kwLen := len(kwRunes)
 		if kwLen == 0 || kwLen > len(normRunes) {
 			continue

@@ -60,7 +60,8 @@ func DeleteFiles(req model.DeleteRequest) model.DeleteResponse {
 	}
 
 	if mode == model.DeleteModeQuarantine {
-		if strings.TrimSpace(req.QuarantineDir) == "" {
+		qDir := strings.TrimSpace(req.QuarantineDir)
+		if qDir == "" {
 			for _, p := range uniquePaths {
 				resp.Results = append(resp.Results, model.DeleteItemResult{
 					Path:  p,
@@ -70,7 +71,17 @@ func DeleteFiles(req model.DeleteRequest) model.DeleteResponse {
 			}
 			return resp
 		}
-		if err := os.MkdirAll(req.QuarantineDir, 0o755); err != nil {
+		if isQuarantineInsideRoots(qDir, req.RootDir, req.RootDirs) {
+			for _, p := range uniquePaths {
+				resp.Results = append(resp.Results, model.DeleteItemResult{
+					Path:  p,
+					Error: "安全拦截：隔离目录不能位于待搜索目录内部",
+				})
+				resp.Failed++
+			}
+			return resp
+		}
+		if err := os.MkdirAll(qDir, 0o755); err != nil {
 			for _, p := range uniquePaths {
 				resp.Results = append(resp.Results, model.DeleteItemResult{
 					Path:  p,
@@ -84,6 +95,23 @@ func DeleteFiles(req model.DeleteRequest) model.DeleteResponse {
 
 	var auditBatch []model.AuditEntry
 	for _, p := range uniquePaths {
+		if isProtectedSystemPath(p) {
+			itemRes := model.DeleteItemResult{
+				Path:  p,
+				Error: "安全拦截：禁止删除系统关键路径或用户主目录",
+			}
+			resp.Results = append(resp.Results, itemRes)
+			resp.Failed++
+			auditBatch = append(auditBatch, model.AuditEntry{
+				Timestamp: time.Now(),
+				Mode:      mode,
+				FilePath:  p,
+				Keywords:  req.Keywords,
+				Success:   false,
+				Error:     itemRes.Error,
+			})
+			continue
+		}
 		var fileSize int64
 		if fi, err := os.Stat(p); err == nil {
 			fileSize = fi.Size()
@@ -352,4 +380,61 @@ func ExportAuditCSV(destPath string) error {
 		})
 	}
 	return nil
+}
+
+func isQuarantineInsideRoots(quarantineDir, rootDir string, rootDirs []string) bool {
+	absQ, err := filepath.Abs(filepath.Clean(quarantineDir))
+	if err != nil {
+		return false
+	}
+	roots := make([]string, 0, len(rootDirs)+1)
+	roots = append(roots, rootDirs...)
+	if strings.TrimSpace(rootDir) != "" {
+		roots = append(roots, rootDir)
+	}
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		absR, err := filepath.Abs(filepath.Clean(r))
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(absR, absQ)
+		if err == nil && (rel == "." || (!strings.HasPrefix(rel, "..") && rel != "")) {
+			return true
+		}
+	}
+	return false
+}
+
+func isProtectedSystemPath(targetPath string) bool {
+	abs, err := filepath.Abs(filepath.Clean(targetPath))
+	if err != nil {
+		return false
+	}
+	// Never allow deleting filesystem root or drive root (e.g. "/" or "C:\")
+	if filepath.Dir(abs) == abs {
+		return true
+	}
+	// Never allow deleting user home directory itself
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if absHome, err := filepath.Abs(filepath.Clean(home)); err == nil {
+			if strings.EqualFold(abs, absHome) {
+				return true
+			}
+		}
+	}
+	lower := strings.ToLower(filepath.ToSlash(abs))
+	protectedExact := []string{
+		"/bin", "/sbin", "/usr", "/etc", "/var", "/lib", "/lib64", "/boot", "/dev", "/proc", "/sys", "/root", "/home",
+		"c:/windows", "c:/program files", "c:/program files (x86)", "c:/programdata", "c:/users",
+	}
+	for _, p := range protectedExact {
+		if lower == p {
+			return true
+		}
+	}
+	return false
 }

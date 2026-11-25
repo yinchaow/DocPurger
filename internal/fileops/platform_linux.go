@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// ApplyWindowRoundedCorners is a no-op on Linux (handled by compositor/CSS).
+func ApplyWindowRoundedCorners() {}
+
 // RevealInFolder opens the file manager and highlights the target file on Kylin V10 SP1 (UKUI Peony) / Linux.
 func RevealInFolder(targetPath string) error {
 	absPath, err := filepath.Abs(targetPath)

@@ -18,6 +18,8 @@ import (
 const (
 	// MaxArchiveEntryBytes caps a single in-memory extracted archive entry (32MB) to prevent zip bombs.
 	MaxArchiveEntryBytes = 32 * 1024 * 1024
+	// MaxArchiveTotalBytes caps total in-memory bytes extracted per archive (256MB) to prevent zip bombs.
+	MaxArchiveTotalBytes = 256 * 1024 * 1024
 	// MaxArchiveEntries caps total entries inspected per archive.
 	MaxArchiveEntries = 2000
 )
@@ -191,7 +193,7 @@ func looksBinary(data []byte) bool {
 // Returns skipReason if archive is password-protected or unreadable.
 func WalkArchiveFile(diskPath string, maxDepth int, cb func(item ArchiveItem)) (skipReason string) {
 	if maxDepth <= 0 {
-		maxDepth = 2
+		maxDepth = 3
 	}
 	ext := strings.ToLower(filepath.Ext(diskPath))
 	lower := strings.ToLower(diskPath)
@@ -266,6 +268,7 @@ func walkZipFile(path string, prefix string, depthLeft int, cb func(item Archive
 func walkZipReader(zr *zip.Reader, prefix string, depthLeft int, cb func(item ArchiveItem)) string {
 	encryptedCount := 0
 	count := 0
+	var totalBytes int64
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -298,10 +301,16 @@ func walkZipReader(zr *zip.Reader, prefix string, depthLeft int, cb func(item Ar
 		}
 
 		var entryData []byte
-		if f.UncompressedSize64 <= MaxArchiveEntryBytes && (IsTextSearchableExt(ext) || (depthLeft > 1 && IsArchiveExt(ext))) {
+		if totalBytes < MaxArchiveTotalBytes && f.UncompressedSize64 <= MaxArchiveEntryBytes && (IsTextSearchableExt(ext) || (depthLeft > 1 && IsArchiveExt(ext))) {
 			rc, err := f.Open()
 			if err == nil {
-				entryData, _ = readLimited(rc, MaxArchiveEntryBytes)
+				rem := MaxArchiveTotalBytes - totalBytes
+				limit := int64(MaxArchiveEntryBytes)
+				if rem < limit {
+					limit = rem
+				}
+				entryData, _ = readLimited(rc, limit)
+				totalBytes += int64(len(entryData))
 				_ = rc.Close()
 			}
 		}

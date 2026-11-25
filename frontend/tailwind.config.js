@@ -6,10 +6,10 @@ export default {
     extend: {
       fontFamily: {
         sans: [
-          '"SF Pro Display"',
-          '"Inter"',
-          '"PingFang SC"',
+          '"Segoe UI Variable"',
+          '"Segoe UI"',
           '"Microsoft YaHei UI"',
+          '"PingFang SC"',
           '"Noto Sans CJK SC"',
           'system-ui',
           '-apple-system',

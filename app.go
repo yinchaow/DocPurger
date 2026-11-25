@@ -8,15 +8,17 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"docpurger/internal/fileops"
 	"docpurger/internal/model"
 	"docpurger/internal/scanner"
 
+	"github.com/wailsapp/wails/v2/pkg/options"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const AppVersion = "1.1.0"
+const AppVersion = "1.2.0"
 
 // App exposes backend capabilities to the Wails React frontend.
 type App struct {
@@ -34,6 +36,35 @@ func NewApp() *App {
 // startup is called when the app starts.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+// domReady is called after the frontend DOM has finished loading.
+func (a *App) domReady(ctx context.Context) {
+	fileops.ApplyWindowRoundedCorners()
+	// Re-apply shortly after Wails calls Show() so both Win11 DWM and Win10 SetWindowRgn take effect reliably.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		fileops.ApplyWindowRoundedCorners()
+		time.Sleep(400 * time.Millisecond)
+		fileops.ApplyWindowRoundedCorners()
+	}()
+}
+
+// SyncWindowCorners refreshes native rounded window corners (e.g. after resize on Windows 10).
+func (a *App) SyncWindowCorners() {
+	fileops.ApplyWindowRoundedCorners()
+}
+
+// onSecondInstanceLaunch brings the existing single-instance window to the foreground.
+func (a *App) onSecondInstanceLaunch(_ options.SecondInstanceData) {
+	if a.ctx == nil {
+		return
+	}
+	wailsRuntime.WindowUnminimise(a.ctx)
+	wailsRuntime.Show(a.ctx)
+	wailsRuntime.WindowSetAlwaysOnTop(a.ctx, true)
+	wailsRuntime.WindowSetAlwaysOnTop(a.ctx, false)
+	fileops.ApplyWindowRoundedCorners()
 }
 
 // GetSystemInfo returns runtime OS/Arch and app metadata.

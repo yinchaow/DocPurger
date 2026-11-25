@@ -18,6 +18,7 @@ export interface CategoryMeta {
   id: string;
   label: string;
   shortLabel: string;
+  extHint: string;
   exts: string;
   dotColor: string;
   iconColor: string;
@@ -28,7 +29,8 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'word',
     label: 'Word / WPS',
     shortLabel: 'DOC',
-    exts: '.docx .doc .wps .rtf',
+    extHint: '.docx 等',
+    exts: '.docx .doc .wps .rtf .odt',
     dotColor: 'bg-sky-500',
     iconColor: 'text-sky-600 dark:text-sky-400',
   },
@@ -36,7 +38,8 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'excel',
     label: 'Excel 表格',
     shortLabel: 'XLS',
-    exts: '.xlsx .xls .et',
+    extHint: '.xlsx 等',
+    exts: '.xlsx .xls .et .ods',
     dotColor: 'bg-emerald-500',
     iconColor: 'text-emerald-600 dark:text-emerald-400',
   },
@@ -44,7 +47,8 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'ppt',
     label: 'PPT 演示',
     shortLabel: 'PPT',
-    exts: '.pptx .ppt .dps',
+    extHint: '.pptx 等',
+    exts: '.pptx .ppt .dps .odp',
     dotColor: 'bg-orange-500',
     iconColor: 'text-orange-600 dark:text-orange-400',
   },
@@ -52,6 +56,7 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'pdf',
     label: 'PDF 文档',
     shortLabel: 'PDF',
+    extHint: '.pdf',
     exts: '.pdf',
     dotColor: 'bg-rose-500',
     iconColor: 'text-rose-600 dark:text-rose-400',
@@ -60,6 +65,7 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'ofd',
     label: 'OFD 版式',
     shortLabel: 'OFD',
+    extHint: '.ofd',
     exts: '.ofd',
     dotColor: 'bg-violet-500',
     iconColor: 'text-violet-600 dark:text-violet-400',
@@ -68,6 +74,7 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'text',
     label: '文本 / 代码',
     shortLabel: 'TXT',
+    extHint: '.txt 等',
     exts: '.txt .md .csv .json .xml .log',
     dotColor: 'bg-zinc-400',
     iconColor: 'text-zinc-500 dark:text-zinc-400',
@@ -76,6 +83,7 @@ export const CATEGORIES: CategoryMeta[] = [
     id: 'archive',
     label: '压缩文件',
     shortLabel: 'ZIP',
+    extHint: '.zip 等',
     exts: '.zip .rar .7z .tar.gz',
     dotColor: 'bg-amber-500',
     iconColor: 'text-amber-600 dark:text-amber-400',
@@ -88,6 +96,7 @@ export function getCategoryMeta(cat: string): CategoryMeta {
       id: 'other',
       label: '其他文件',
       shortLabel: 'FILE',
+      extHint: '',
       exts: '',
       dotColor: 'bg-zinc-400',
       iconColor: 'text-zinc-500 dark:text-zinc-400',
